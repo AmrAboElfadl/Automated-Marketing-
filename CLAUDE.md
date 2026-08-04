@@ -23,7 +23,8 @@ or creates legal exposure.
    reverse-engineered mobile API calls, no browser automation to post.
 3. **Never store OAuth tokens in table columns.** Tokens live in Supabase Vault
    or Vercel environment variables. Tables store only `token_secret_name`, a
-   pointer.
+   pointer. Read them with `readSecret()` from `lib/vault.ts` — never log the
+   value.
 4. **Never commit secrets.** No `.env`, no service-role keys, no tokens in code,
    comments, tests, or example values.
 5. **Respect per-platform rate limits and daily post caps.** The `accounts`
@@ -75,7 +76,8 @@ registers in `lib/adapters/index.ts`. The scheduler is platform-agnostic and
 must stay that way — no `if (platform === 'youtube')` branches in the route.
 
 `mockAdapter` exists so the pipeline can be tested end-to-end without any real
-credentials. Keep it working.
+credentials. Keep it working. Set `MOCK_PUBLISH=true` and every platform
+resolves to it — including `fetchMetrics`, so the metrics cron is testable too.
 
 ## Roadmap
 
@@ -83,15 +85,25 @@ credentials. Keep it working.
 |---|---|---|
 | 1 | Schema + storage | done |
 | 2 | Scheduler + mock adapter | done |
-| 3 | YouTube adapter (Data API v3, resumable upload) | next |
-| 4 | Instagram + Facebook (Meta Graph API) | pending |
+| 3 | YouTube adapter (Data API v3, resumable upload) | done |
+| 4 | Instagram + Facebook (Meta Graph API) | next |
 | 5 | Pinterest, TikTok, X | pending |
 | 6 | Metrics collection + sponsor-facing reporting | stub exists |
 
-**Phase 3 notes:** YouTube uses resumable upload. Vercel Hobby caps function
-duration at 60s — for larger files, either upgrade to Pro (`maxDuration = 300`)
-or move upload to a Supabase Edge Function. Flag this rather than silently
-truncating.
+**Phase 3 notes:** `lib/adapters/youtube.ts`. Chunked resumable upload, buffered
+in one invocation and capped by `YOUTUBE_MAX_MEDIA_BYTES` (256 MiB default) —
+oversized media fails loudly rather than uploading truncated. Raising it means
+raising `maxDuration` to 300 on Vercel Pro, or moving the upload to a Supabase
+Edge Function.
+
+The binding constraint is **API quota, not `daily_post_limit`**: 10,000
+units/day per Cloud project and ~1,600 per `videos.insert` is ~6 uploads/day
+across every channel sharing that project.
+
+Watch time and shares are not in Data API v3 — they come from the YouTube
+Analytics API under a separate `yt-analytics.readonly` scope, so
+`fetchMetrics` treats them as best-effort and still returns
+views/likes/comments if that scope was never granted.
 
 **Phase 4 notes:** Instagram requires a Business/Creator account linked to a
 Facebook Page. Content publishing is a two-step create-container-then-publish

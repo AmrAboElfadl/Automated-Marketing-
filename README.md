@@ -13,9 +13,10 @@ npm run dev
 
 ### 1. Database
 
-Already applied to Supabase project `cqlspabncujagkdvzuyt`.
-For a fresh project, run `supabase/migrations/001_initial_schema.sql` in the
-Supabase SQL Editor.
+Run the files in `supabase/migrations/` in order, in the Supabase SQL Editor.
+Migration `001` (schema) is already applied to project `cqlspabncujagkdvzuyt`;
+`002` (Vault secret access) is required before the YouTube adapter can read a
+token.
 
 ### 2. Environment variables
 
@@ -25,7 +26,8 @@ Supabase SQL Editor.
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Settings → API (keep secret) |
 | `CRON_SECRET` | Generate: `openssl rand -hex 32` |
 
-Add all three to Vercel → Settings → Environment Variables.
+Add all three to Vercel → Settings → Environment Variables. See
+`.env.example` for the per-platform variables added in later phases.
 
 ### 3. Deploy
 
@@ -46,6 +48,52 @@ curl -H "Authorization: Bearer $CRON_SECRET" \
 Expected: `{"claimed":0,"message":"nothing due"}` — the pipeline works, the
 queue is empty.
 
+To exercise the full claim → publish → mark-published path without touching a
+real platform, set `MOCK_PUBLISH=true`, run `npx tsx scripts/seed.ts`, then hit
+the endpoint again.
+
+## Connecting a YouTube channel
+
+Accounts are created by hand — the engine never registers them. Per channel:
+
+1. **Google Cloud project** — enable *YouTube Data API v3*. Create an OAuth 2.0
+   Client ID and put it in `YOUTUBE_CLIENT_ID` / `YOUTUBE_CLIENT_SECRET`.
+2. **Consent, once, as a human** — authorise the channel's Google account for
+   scope `https://www.googleapis.com/auth/youtube.upload` (add
+   `https://www.googleapis.com/auth/yt-analytics.readonly` to get watch time and
+   shares in `post_metrics`). Keep the refresh token.
+3. **Store the token in Vault**, never in a column:
+
+   ```sql
+   select vault.create_secret('<refresh-token>', 'yt_token_mainchannel');
+
+   update accounts
+      set token_secret_name   = 'yt_token_mainchannel',
+          external_account_id = '<UC... channel id>'
+    where platform = 'youtube' and handle = '@mainchannel';
+   ```
+
+   `external_account_id` is optional but recommended: the adapter checks the
+   token actually owns that channel and aborts on a mismatch, so a mixed-up
+   secret can't publish to the wrong channel.
+
+### Two limits worth knowing before you schedule anything
+
+- **API quota, not the post cap, is the real ceiling.** A Cloud project gets
+  10,000 units/day and `videos.insert` costs ~1,600 — about **six uploads/day**
+  shared across every channel on that project, whatever
+  `accounts.daily_post_limit` says. Request more quota from Google, or use one
+  Cloud project per channel.
+- **Function duration.** The upload runs inside one invocation and is capped at
+  256 MiB (`YOUTUBE_MAX_MEDIA_BYTES`); oversized media fails with a clear error
+  instead of uploading a truncated video. Vercel Hobby allows 60s. For bigger
+  files, raise `maxDuration` to 300 on Pro and lift the cap to match, or move
+  the upload to a Supabase Edge Function.
+
+Uploads land as `public` by default (`YOUTUBE_PRIVACY_STATUS`). Note that
+YouTube locks uploads from an **unverified** API project to private regardless
+of what is requested — verify the project if posts appear private.
+
 ## Claude Code
 
 - `CLAUDE.md` — project context, architecture, and hard rules
@@ -60,7 +108,7 @@ to repository secrets. Then tag `@claude` in any issue or PR.
 
 1. ~~Schema + storage~~
 2. ~~Scheduler + mock adapter~~
-3. YouTube adapter ← next
-4. Instagram + Facebook
+3. ~~YouTube adapter~~
+4. Instagram + Facebook ← next
 5. Pinterest, TikTok, X
 6. Metrics + sponsor reporting

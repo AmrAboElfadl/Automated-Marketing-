@@ -36,6 +36,9 @@ export interface PublishAdapter {
  * Mock adapter — pretends to publish and returns a fake ID.
  * Lets the whole pipeline be verified before any developer account exists.
  * Real adapters slot in beside it with zero scheduler changes.
+ *
+ * Reached by setting MOCK_PUBLISH=true; `getAdapter` overrides `platform` with
+ * whatever was asked for, so the value below is only a placeholder.
  */
 export const mockAdapter: PublishAdapter = {
   platform: "youtube",
@@ -45,6 +48,14 @@ export const mockAdapter: PublishAdapter = {
     return {
       externalPostId: `mock_${Date.now()}`,
       publishedAt: new Date().toISOString(),
+    };
+  },
+  async fetchMetrics(externalPostId) {
+    console.log("[mock] fetchMetrics:", externalPostId);
+    return {
+      views: 100, likes: 10, comments: 2, shares: 1, saves: 1,
+      watchTimeSecs: 250, followerCount: 42,
+      raw: { mock: true, externalPostId },
     };
   },
 };
