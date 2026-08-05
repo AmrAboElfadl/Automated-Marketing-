@@ -1,24 +1,35 @@
 name: Claude Code
 
-# Tag @claude in an issue, PR, or review comment and Claude works the task,
+# Tag @claude in an issue, PR comment, or review and Claude works the task,
 # then opens a pull request. It never pushes to main directly.
 on:
   issue_comment:
     types: [created]
   pull_request_review_comment:
     types: [created]
+  pull_request_review:
+    types: [submitted]
   issues:
     types: [opened, assigned]
 
+# One run at a time per issue/PR, so a double-tag can't race itself.
+concurrency:
+  group: claude-${{ github.event.issue.number || github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
 jobs:
   claude:
-    if: contains(github.event.comment.body, '@claude') || contains(github.event.issue.body, '@claude')
+    if: >-
+      contains(github.event.comment.body, '@claude') ||
+      contains(github.event.issue.body, '@claude') ||
+      contains(github.event.review.body, '@claude')
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      pull-requests: write
-      issues: write
-      id-token: write
+      contents: write        # create branches, push commits
+      pull-requests: write   # open PRs, comment on them
+      issues: write          # reply in issue threads
+      actions: read          # read CI results while working a task
+      id-token: write        # OIDC, required by the action
     steps:
       - uses: actions/checkout@v4
         with:
