@@ -14,9 +14,13 @@ npm run dev
 ### 1. Database
 
 Run the files in `supabase/migrations/` in order, in the Supabase SQL Editor.
-Migration `001` (schema) is already applied to project `cqlspabncujagkdvzuyt`;
-`002` (Vault secret access) is required before the YouTube adapter can read a
-token.
+Migration `001` (schema) is already applied to project `cqlspabncujagkdvzuyt`.
+Still to apply:
+
+- `002` — Vault secret access. Required before the YouTube adapter can read a
+  token.
+- `003` — enforces `accounts.daily_post_limit` in the atomic claim. Without it
+  the column is ignored and nothing stops the scheduler from over-posting.
 
 ### 2. Environment variables
 

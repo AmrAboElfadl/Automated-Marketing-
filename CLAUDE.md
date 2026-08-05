@@ -27,8 +27,10 @@ or creates legal exposure.
    value.
 4. **Never commit secrets.** No `.env`, no service-role keys, no tokens in code,
    comments, tests, or example values.
-5. **Respect per-platform rate limits and daily post caps.** The `accounts`
-   table has `daily_post_limit`. Enforce it.
+5. **Respect per-platform rate limits and daily post caps.**
+   `accounts.daily_post_limit` is enforced inside `claim_due_posts` — see the
+   scheduler section. Keep it that way; do not add a code path that publishes
+   without going through the claim.
 6. **No reused third-party content.** Content must be operator-created,
    AI-generated, or properly licensed. Re-uploading others' videos gets channels
    demonetized and is copyright infringement.
@@ -68,6 +70,13 @@ brands ─┬─> accounts ──┐
 
 **The atomic claim is load-bearing.** Overlapping cron runs would otherwise
 double-post. Do not replace it with a plain `SELECT ... WHERE status='queued'`.
+
+`claim_due_posts` is also where `daily_post_limit` is enforced (migration 003).
+It counts today's `published` **and** in-flight `processing` rows per account,
+so overlapping runs cannot each claim a full allowance, and it skips accounts
+that are not `active` so their posts wait instead of burning retries. The
+allowance resets at 00:00 UTC. Enforcing the cap in the loop instead would
+claim the post first and so still spend an attempt — keep it in the claim.
 
 ### Adapters
 
