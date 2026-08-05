@@ -1,31 +1,75 @@
-import { supabaseAdmin } from "@/lib/supabase";
+import { loadQueueSnapshot } from "@/lib/queue-snapshot";
 
 export const dynamic = "force-dynamic";
 
-export default async function Home() {
-  const statuses = ["queued", "processing", "published", "failed"] as const;
+const codeBlock = {
+  background: "#f4f4f5",
+  color: "#18181b",
+  padding: "0.75rem",
+  borderRadius: "0.375rem",
+  whiteSpace: "pre-wrap",
+  wordBreak: "break-word",
+} as const;
 
-  const counts = await Promise.all(
-    statuses.map(async (s) => {
-      const { count } = await supabaseAdmin
-        .from("post_targets")
-        .select("*", { count: "exact", head: true })
-        .eq("status", s);
-      return [s, count ?? 0] as const;
-    })
-  );
+export default async function Home() {
+  const { counts, error, missingEnv } = await loadQueueSnapshot();
+
+  if (error === null) {
+    return (
+      <main style={{ fontFamily: "system-ui, sans-serif", padding: "2rem", maxWidth: "42rem" }}>
+        <h1>Social Publisher</h1>
+        <h2>Queue status</h2>
+        <ul>
+          {counts.map(([status, n]) => (
+            <li key={status}>
+              {status}: <strong>{n}</strong>
+            </li>
+          ))}
+        </ul>
+      </main>
+    );
+  }
 
   return (
-    <main>
+    <main style={{ fontFamily: "system-ui, sans-serif", padding: "2rem", maxWidth: "42rem" }}>
       <h1>Social Publisher</h1>
-      <p>Queue status</p>
-      <ul>
-        {counts.map(([status, n]) => (
-          <li key={status}>
-            {status}: <strong>{n}</strong>
-          </li>
-        ))}
-      </ul>
+      <h2>Not reading the database</h2>
+
+      {missingEnv.length > 0 ? (
+        <>
+          <p>
+            {missingEnv.length === 1 ? "This variable is" : "These variables are"} not set on
+            this deployment:
+          </p>
+          <ul>
+            {missingEnv.map((name) => (
+              <li key={name}>
+                <code>{name}</code>
+              </li>
+            ))}
+          </ul>
+          <p>
+            Add {missingEnv.length === 1 ? "it" : "them"} in Vercel under Settings →
+            Environment Variables, then <strong>redeploy</strong> — variables only take effect
+            on a new build.
+          </p>
+        </>
+      ) : (
+        <p>
+          Every required variable is set, so this is not a configuration gap. The database
+          call itself failed:
+        </p>
+      )}
+
+      <pre style={codeBlock}>{error}</pre>
+
+      <p>
+        Publishing does not depend on this page — it is only a queue dashboard. Check the
+        scheduler itself with:
+      </p>
+      <pre style={codeBlock}>
+        {'curl -H "Authorization: Bearer $CRON_SECRET" \\\n  <this-domain>/api/cron/publish'}
+      </pre>
     </main>
   );
 }
