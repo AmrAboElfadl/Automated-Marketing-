@@ -135,8 +135,13 @@ before direct posting is enabled. Unaudited apps can only post to private.
 ```bash
 npm run dev         # local dev
 npm run typecheck   # tsc --noEmit — run before every commit
+npm test            # vitest run — also run before every commit
+npm run test:watch  # vitest, watching
 npm run build       # production build
-npx tsx scripts/seed.ts   # seed test data
+
+npm run add-account -- --help   # register an account you already own
+npm run add-content  -- --help   # upload media and queue it
+npx tsx scripts/seed.ts          # seed test data
 
 # Trigger the scheduler manually
 curl -H "Authorization: Bearer $CRON_SECRET" localhost:3000/api/cron/publish
@@ -148,9 +153,23 @@ See `.env.example`. Required now: `SUPABASE_URL`,
 `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`. Platform credentials are added per
 phase.
 
+## Tests
+
+`vitest`, run by CI. Files are colocated as `*.test.ts`.
+
+`lib/adapters/youtube.test.ts` drives the adapter against a stubbed `fetch`, so
+it covers the resumable-upload protocol, metadata limits, the publish guards and
+the error mapping with no credentials. Note the `loadAdapter()` helper: it calls
+`vi.resetModules()` before importing, because the adapter caches access tokens at
+module scope and a shared cache silently skips the token-refresh paths the error
+tests exist to check. New adapters should follow the same shape.
+
+Not covered anywhere: the Supabase round-trip and Storage uploads in
+`scripts/`, which need the service-role key.
+
 ## Working style
 
-- Run `npm run typecheck` before proposing a commit.
+- Run `npm run typecheck` and `npm test` before proposing a commit.
 - Open pull requests. Do not push directly to `main`.
 - When a change affects the schema, include the migration in the same PR.
 - If a task would require breaking one of the hard rules above, stop and say so

@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "seed": "tsx scripts/seed.ts",
     "add-account": "tsx scripts/add-account.ts",
-    "add-content": "tsx scripts/add-content.ts"
+    "add-content": "tsx scripts/add-content.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
@@ -21,7 +23,8 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.7.0",
-    "tsx": "^4.19.0"
+    "vitest": "^4.1.10"
   }
 }
