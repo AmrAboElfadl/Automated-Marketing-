@@ -133,6 +133,63 @@ Uploads land as `public` by default (`YOUTUBE_PRIVACY_STATUS`). Note that
 YouTube locks uploads from an **unverified** API project to private regardless
 of what is requested — verify the project if posts appear private.
 
+## Day-to-day: adding accounts and content
+
+Two scripts cover the whole operator workflow. Both need `SUPABASE_URL` and
+`SUPABASE_SERVICE_ROLE_KEY` in the environment (`.env.local`, or inline).
+
+### Register an account you own
+
+This records an account — it never creates one. Creating social accounts is a
+manual human step (hard rule 1) and must stay that way.
+
+```bash
+npm run add-account -- \
+  --brand "Abaya Brand" \
+  --platform youtube \
+  --handle "@abayabrand" \
+  --channel-id UCxxxxxxxxxxxxxxxxxxxxxx \
+  --secret yt_token_abaya \
+  --daily-limit 3
+```
+
+It checks the Vault secret exists and warns if it does not, rather than letting
+a dangling pointer surface as a wasted publish attempt later. Re-running with
+the same `--platform`/`--handle` updates that account instead of failing, so it
+is safe for fixing a typo or pointing at a rotated secret.
+
+### Upload and schedule content
+
+```bash
+npm run add-content -- \
+  --file ./clip.mp4 \
+  --brand "Abaya Brand" \
+  --title "Three ways to style an abaya" \
+  --source original_shot \
+  --caption "Which one is your favourite?" \
+  --hashtags Shorts,abaya,modestfashion \
+  --at 2026-08-06T18:00:00Z \
+  --stagger 30 \
+  --approve
+```
+
+This uploads to Storage, creates the `content_items` row, and queues one
+`post_targets` row per account — defaulting to every active account on the
+brand, or use `--accounts "@one,@two"`.
+
+- `--source` is mandatory and has no default. Hard rule 6 forbids reused
+  third-party content, so provenance gets declared every time.
+- `--approve` sets `is_approved`. Without it the scheduler refuses the post
+  with "content not approved" — deliberate, so nothing publishes by accident.
+- `--stagger <minutes>` spaces the same content across accounts.
+- `--dry-run` prints the plan and writes nothing.
+
+If any step after the upload fails, the uploaded object and the
+`content_items` row are removed, so a failed run leaves nothing orphaned in
+Storage.
+
+Add `--help` to either script for the full option list.
+
 ## Claude Code
 
 - `CLAUDE.md` — project context, architecture, and hard rules

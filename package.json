@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "seed": "tsx scripts/seed.ts"
+    "seed": "tsx scripts/seed.ts",
+    "add-account": "tsx scripts/add-account.ts",
+    "add-content": "tsx scripts/add-content.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
