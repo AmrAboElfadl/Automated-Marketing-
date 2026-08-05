@@ -35,14 +35,49 @@ Add all three to Vercel → Settings → Environment Variables. See
 
 ### 3. Deploy
 
-Push to GitHub, import into Vercel. `vercel.json` registers the cron jobs
-automatically.
+Push to GitHub and import into Vercel. Import the repo **once** — two Vercel
+projects pointing at the same repo both build on every push and both run the
+scheduler. The atomic claim stops that from double-posting, but it wastes
+builds and makes logs confusing.
 
-**Note:** Vercel's Hobby plan runs cron only once per day. For the 15-minute
-schedule you need Pro, or trigger `/api/cron/publish` externally (Supabase
-`pg_cron` + `pg_net`, or cron-job.org) with the Bearer header.
+### 4. Schedule the scheduler
 
-### 4. Verify
+`vercel.json` deliberately registers **no** cron jobs, because Vercel's Hobby
+plan triggers cron only **once per day** — which would ignore `scheduled_at`
+entirely and post everything in one daily burst. Trigger the endpoints
+externally instead.
+
+Any scheduler works ([cron-job.org](https://cron-job.org) is free). Two jobs:
+
+| Job | URL | Interval |
+|---|---|---|
+| publish | `https://<your-app>.vercel.app/api/cron/publish` | every 15 min |
+| metrics | `https://<your-app>.vercel.app/api/cron/metrics` | every 6 hours |
+
+Both need a request header — this is the only thing protecting the endpoints,
+so treat it like a password:
+
+```
+Authorization: Bearer <your CRON_SECRET>
+```
+
+Overlapping or duplicated triggers are safe by design: `claim_due_posts` uses
+`FOR UPDATE SKIP LOCKED`, so a second concurrent run claims nothing.
+
+**On Vercel Pro instead?** Add the crons to `vercel.json` and Vercel injects
+the `Authorization` header itself:
+
+```json
+"crons": [
+  { "path": "/api/cron/publish", "schedule": "*/15 * * * *" },
+  { "path": "/api/cron/metrics", "schedule": "0 */6 * * *" }
+]
+```
+
+Pro also allows raising `maxDuration` to 300 in the route files, which is what
+lets `YOUTUBE_MAX_MEDIA_BYTES` go above the default 256 MiB.
+
+### 5. Verify
 
 ```bash
 curl -H "Authorization: Bearer $CRON_SECRET" \
