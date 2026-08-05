@@ -12,7 +12,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # Match Vercel's runtime. On Node 20 there is no global WebSocket, so
+          # @supabase/supabase-js cannot build its Realtime client — CI would
+          # fail on code paths that work fine in production.
+          node-version: "22"
           cache: npm
       - run: npm ci
       - run: npm run typecheck

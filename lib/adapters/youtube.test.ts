@@ -2,6 +2,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PublishAdapter, PublishInput } from "./types";
 
 /**
+ * Stub the Supabase client, not `lib/vault`. Vault's own logic — including the
+ * "create it with vault.create_secret" message these tests assert on — stays
+ * real; only the client underneath it is replaced.
+ *
+ * This is also why the boundary matters rather than being a style choice:
+ * `createClient` builds a Realtime client that needs a native WebSocket, which
+ * Node 20 does not have. Constructing a real client made these tests pass on
+ * Node 22 and fail on Node 20.
+ */
+const { rpcMock } = vi.hoisted(() => ({ rpcMock: vi.fn() }));
+vi.mock("../supabase", () => ({ supabaseAdmin: { rpc: rpcMock } }));
+
+/**
  * The adapter is exercised against a stubbed `fetch`, so these tests cover the
  * resumable-upload protocol, metadata shaping, the publish guards and the error
  * mapping without touching Google or Supabase.
@@ -42,11 +55,6 @@ function defaultHandler(url: string, init: RequestInit | undefined): Response | 
 
   if (url.startsWith("https://oauth2.googleapis.com/token")) {
     return json({ access_token: "atoken", expires_in: 3600 });
-  }
-
-  // Supabase Vault RPC, so tokenSecretName paths are reachable.
-  if (url.includes("/rest/v1/rpc/read_secret")) {
-    return json("rtoken-from-vault");
   }
 
   if (url.includes("/youtube/v3/channels") && url.includes("mine=true")) {
@@ -158,6 +166,11 @@ beforeEach(() => {
   initMetadata = null;
 
   vi.unstubAllGlobals();
+
+  // Default: the Vault secret exists. Individual tests override.
+  rpcMock.mockReset();
+  rpcMock.mockImplementation(async () => ({ data: "rtoken-from-vault", error: null }));
+
   process.env.SUPABASE_URL = "https://placeholder.supabase.co";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "placeholder";
   process.env.YOUTUBE_CLIENT_ID = "cid";
@@ -395,11 +408,12 @@ describe("credentials and error mapping", () => {
     const result = await adapter.publish(input({ tokenSecretName: "yt_vault_ok" }));
 
     expect(result.externalPostId).toBe("vid_123");
-    expect(calls.some((call) => call.url.includes("/rpc/read_secret"))).toBe(true);
+    expect(rpcMock).toHaveBeenCalledWith("read_secret", { secret_name: "yt_vault_ok" });
   });
 
   it("explains a missing Vault secret", async () => {
-    installFetch((url) => (url.includes("/rpc/read_secret") ? json(null) : null));
+    rpcMock.mockImplementation(async () => ({ data: null, error: null }));
+    installFetch();
     const adapter = await loadAdapter();
 
     await expect(adapter.publish(input({ tokenSecretName: "yt_missing" }))).rejects.toThrow(
