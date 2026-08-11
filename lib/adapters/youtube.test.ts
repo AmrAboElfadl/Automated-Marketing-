@@ -91,7 +91,9 @@ function defaultHandler(url: string, init: RequestInit | undefined): Response | 
     expect(total).toBe(MEDIA_SIZE);
 
     uploadedBytes = end + 1;
-    if (uploadedBytes >= total) return json({ id: "vid_123" });
+    if (uploadedBytes >= total) {
+      return json({ id: "vid_123", snippet: { channelId: "UC_right" } });
+    }
     return new Response(null, { status: 308, headers: { range: `bytes=0-${end}` } });
   }
 
@@ -254,6 +256,55 @@ describe("publish", () => {
       /channel mismatch/i
     );
     expect(calls.some((call) => call.url.includes("/upload/"))).toBe(false);
+  });
+
+  it("still uploads when the token cannot read channel data", async () => {
+    // youtube.upload alone cannot call channels.list, so a 403 there must not
+    // block the upload the token *is* authorised to perform.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    installFetch((url) =>
+      url.includes("mine=true")
+        ? json(
+            {
+              error: {
+                code: 403,
+                message: "Request had insufficient authentication scopes.",
+                errors: [{ reason: "insufficientPermissions" }],
+              },
+            },
+            403
+          )
+        : null
+    );
+
+    const adapter = await loadAdapter();
+    const result = await adapter.publish(input());
+
+    expect(result.externalPostId).toBe("vid_123");
+    expect(uploadedBytes).toBe(MEDIA_SIZE);
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/youtube\.readonly/));
+    warn.mockRestore();
+  });
+
+  it("reports a post-upload channel mismatch without failing the publish", async () => {
+    // Failing here would make the scheduler retry and upload duplicates.
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    installFetch(
+      (url) => (url.includes("mine=true") ? json({ error: { code: 403 } }, 403) : null),
+      (url) => {
+        if (!url.startsWith(SESSION_URL)) return null;
+        uploadedBytes = MEDIA_SIZE;
+        return json({ id: "vid_123", snippet: { channelId: "UC_somewhere_else" } });
+      }
+    );
+
+    const adapter = await loadAdapter();
+    const result = await adapter.publish(input());
+
+    expect(result.externalPostId).toBe("vid_123");
+    expect(error).toHaveBeenCalledWith(expect.stringMatching(/channel mismatch/));
+    expect(error).toHaveBeenCalledWith(expect.stringMatching(/UC_somewhere_else/));
+    error.mockRestore();
   });
 
   it("rejects non-video media", async () => {

@@ -337,14 +337,38 @@ function oversized(size: number): Error {
   );
 }
 
-/** Confirms the token really controls the channel we intend to post to. */
-async function assertChannelMatches(
+/**
+ * Confirms the token really controls the channel we intend to post to.
+ *
+ * `channels.list(mine=true)` needs a *read* scope — `youtube.readonly`,
+ * `youtube`, or `youtube.force-ssl`. A token scoped only to `youtube.upload`
+ * cannot make this call at all, so a 403 is treated as "cannot check" rather
+ * than a failure. Refusing to publish there would make the guard a hard
+ * dependency on a scope the upload itself does not need, which is not what the
+ * setup docs ask operators to grant.
+ *
+ * When the check is skipped, `publish()` still compares the channel id that
+ * `videos.insert` returns — so a mismatch is still surfaced, just after the
+ * upload rather than before it.
+ */
+async function verifyChannelOwnership(
   accessToken: string,
   expectedChannelId: string
-): Promise<void> {
+): Promise<"verified" | "unverifiable"> {
   const res = await fetch(`${DATA_API}/channels?part=id&mine=true`, {
     headers: { authorization: `Bearer ${accessToken}` },
   });
+
+  if (res.status === 403) {
+    await discard(res);
+    console.warn(
+      "[youtube] skipping the pre-upload channel check: this token has no read " +
+        "scope. Grant youtube.readonly to verify ownership before uploading " +
+        "rather than after."
+    );
+    return "unverifiable";
+  }
+
   if (!res.ok) throw await describeFailure(res, "youtube channels.list(mine)");
 
   const body: unknown = await res.json();
@@ -366,6 +390,8 @@ async function assertChannelMatches(
         `this token owns ${owned.join(", ")} — refusing to publish to the wrong channel`
     );
   }
+
+  return "verified";
 }
 
 async function startResumableSession(
@@ -399,11 +425,17 @@ async function startResumableSession(
  * protocol: 308 means "keep going, here is how far I got", 2xx means done and
  * carries the video resource.
  */
+interface UploadResult {
+  videoId: string;
+  /** From the returned resource; absent if YouTube omits the snippet. */
+  channelId: string | null;
+}
+
 async function uploadInChunks(
   sessionUrl: string,
   accessToken: string,
   media: Media
-): Promise<string> {
+): Promise<UploadResult> {
   const total = media.bytes.byteLength;
   let offset = 0;
   let retries = 0;
@@ -441,8 +473,15 @@ async function uploadInChunks(
 
     if (res.ok) {
       const body: unknown = await res.json();
-      if (isRecord(body) && typeof body.id === "string") return body.id;
-      throw new Error("youtube upload completed but returned no video id");
+      if (!isRecord(body) || typeof body.id !== "string") {
+        throw new Error("youtube upload completed but returned no video id");
+      }
+
+      const snippet = isRecord(body.snippet) ? body.snippet : {};
+      return {
+        videoId: body.id,
+        channelId: typeof snippet.channelId === "string" ? snippet.channelId : null,
+      };
     }
 
     // Transient server-side failures are retried against the same offset.
@@ -468,8 +507,9 @@ async function publish(input: PublishInput): Promise<PublishResult> {
 
   const accessToken = await getAccessToken(input.tokenSecretName);
 
+  let ownership: "verified" | "unverifiable" = "unverifiable";
   if (input.externalAccountId) {
-    await assertChannelMatches(accessToken, input.externalAccountId);
+    ownership = await verifyChannelOwnership(accessToken, input.externalAccountId);
   }
 
   const media = await downloadMedia(input.mediaUrl);
@@ -495,10 +535,28 @@ async function publish(input: PublishInput): Promise<PublishResult> {
     media.contentType
   );
 
-  const videoId = await uploadInChunks(sessionUrl, accessToken, media);
+  const uploaded = await uploadInChunks(sessionUrl, accessToken, media);
+
+  // The pre-upload check could not run, so verify from what YouTube returned.
+  // This is reported rather than thrown: the video already exists, and failing
+  // here would have the scheduler retry and upload duplicates — worse than a
+  // loud log against a misconfigured external_account_id.
+  if (
+    ownership === "unverifiable" &&
+    input.externalAccountId &&
+    uploaded.channelId &&
+    uploaded.channelId !== input.externalAccountId
+  ) {
+    console.error(
+      `[youtube] channel mismatch: video ${uploaded.videoId} landed on ` +
+        `${uploaded.channelId}, but accounts.external_account_id says ` +
+        `${input.externalAccountId}. The upload went to the channel this token ` +
+        `owns — correct external_account_id so metrics and future posts line up.`
+    );
+  }
 
   return {
-    externalPostId: videoId,
+    externalPostId: uploaded.videoId,
     publishedAt: new Date().toISOString(),
   };
 }

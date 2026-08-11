@@ -116,6 +116,13 @@ Accounts are created by hand — the engine never registers them. Per channel:
    token actually owns that channel and aborts on a mismatch, so a mixed-up
    secret can't publish to the wrong channel.
 
+   That pre-upload check needs a **read** scope — `channels.list(mine=true)` is
+   not covered by `youtube.upload`. Add
+   `https://www.googleapis.com/auth/youtube.readonly` when you authorise if you
+   want it. Without that scope the adapter logs a warning, uploads anyway, and
+   compares the channel id that `videos.insert` returns — so a mismatch is
+   still reported, just after the upload instead of before it.
+
 ### Two limits worth knowing before you schedule anything
 
 - **API quota, not the post cap, is the real ceiling.** A Cloud project gets
