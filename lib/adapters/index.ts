@@ -1,5 +1,7 @@
 import type { Platform } from "../supabase";
 import { mockAdapter, type PublishAdapter } from "./types";
+import { facebookAdapter } from "./facebook";
+import { instagramAdapter } from "./instagram";
 import { youtubeAdapter } from "./youtube";
 
 /**
@@ -8,8 +10,8 @@ import { youtubeAdapter } from "./youtube";
  */
 const registry: Partial<Record<Platform, PublishAdapter>> = {
   youtube: youtubeAdapter,
-  // instagram: instagramAdapter,   <- Phase 4
-  // facebook:  facebookAdapter,    <- Phase 4
+  instagram: instagramAdapter,
+  facebook: facebookAdapter,
   // tiktok:    tiktokAdapter,      <- Phase 5
   // pinterest: pinterestAdapter,   <- Phase 5
   // x:         xAdapter,           <- Phase 5

@@ -95,8 +95,8 @@ resolves to it — including `fetchMetrics`, so the metrics cron is testable too
 | 1 | Schema + storage | done |
 | 2 | Scheduler + mock adapter | done |
 | 3 | YouTube adapter (Data API v3, resumable upload) | done |
-| 4 | Instagram + Facebook (Meta Graph API) | next |
-| 5 | Pinterest, TikTok, X | pending |
+| 4 | Instagram + Facebook (Meta Graph API) | done |
+| 5 | Pinterest, TikTok, X | next |
 | 6 | Metrics collection + sponsor-facing reporting | stub exists |
 
 **Phase 3 notes:** `lib/adapters/youtube.ts`. Chunked resumable upload, buffered
@@ -114,9 +114,33 @@ Analytics API under a separate `yt-analytics.readonly` scope, so
 `fetchMetrics` treats them as best-effort and still returns
 views/likes/comments if that scope was never granted.
 
-**Phase 4 notes:** Instagram requires a Business/Creator account linked to a
-Facebook Page. Content publishing is a two-step create-container-then-publish
-flow, not a single call.
+**Phase 4 notes:** `lib/adapters/instagram.ts`, `lib/adapters/facebook.ts`, with
+shared Graph API plumbing in `lib/adapters/meta.ts`.
+
+Instagram requires a Business/Creator account linked to a Facebook Page.
+Publishing is create-container → poll `status_code` → `media_publish`. The poll
+is required, not defensive: Meta downloads the media from our signed URL on its
+own schedule and rejects `media_publish` until it reports `FINISHED`. The wait
+is capped at 40s to stay inside Vercel's function budget; a container that
+outlasts it is reported with its id, because a retry would create a *second*
+container.
+
+`external_account_id` means different things per platform — the YouTube channel
+id, the Instagram *user* id, the Facebook *Page* id. Facebook additionally needs
+a **Page** access token; a user token authenticates but cannot post as the Page.
+
+**Meta tokens do not refresh.** Google's flow exchanges a refresh token for
+short access tokens every run; Meta's Vault secret holds a long-lived access
+token that is sent directly, and when it dies there is no automatic recovery —
+only a rotation. Error code 190 maps to that explicitly.
+
+Instagram caps API publishing at 50 posts per rolling 24h per account,
+independent of `daily_post_limit`.
+
+Facebook metrics are deliberately narrow: `/{page-id}/videos` returns a *video*
+id rather than the feed post id, and the mapping is not reliably derivable, so
+reads are limited to what the returned id supports and anything else is zero
+rather than guessed.
 
 **Phase 5 notes:** TikTok's Content Posting API requires app audit approval
 before direct posting is enabled. Unaudited apps can only post to private.
