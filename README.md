@@ -212,6 +212,45 @@ to repository secrets. Then tag `@claude` in any issue or PR.
 1. ~~Schema + storage~~
 2. ~~Scheduler + mock adapter~~
 3. ~~YouTube adapter~~
-4. Instagram + Facebook ← next
-5. Pinterest, TikTok, X
+4. ~~Instagram + Facebook~~
+5. Pinterest, TikTok, X ← next
 6. Metrics + sponsor reporting
+
+## Connecting Instagram and Facebook
+
+Accounts are created by hand, as always. Per brand:
+
+1. **Instagram** — convert the account to **Business** or **Creator**. The API
+   refuses to publish to personal accounts.
+2. **Facebook Page** — create one and link the Instagram account to it.
+   Publishing goes through the Page, not a personal profile.
+3. **Meta app** — create one at [developers.facebook.com](https://developers.facebook.com),
+   add the Instagram and Pages products, and grant your own accounts a role on
+   it. Publishing to accounts you control works in Development mode; App Review
+   is only needed to serve other people.
+4. **Long-lived token** — exchange the short-lived token, then store it:
+
+   ```sql
+   select vault.create_secret('<token>', 'ig_token_main');
+   ```
+
+   ```sql
+   update accounts
+      set token_secret_name   = 'ig_token_main',
+          external_account_id = '<instagram user id>'
+    where platform = 'instagram' and handle = '@yourhandle';
+   ```
+
+`external_account_id` differs per platform: the **Instagram user id** (numeric,
+not the @handle) for Instagram, the **Page id** for Facebook. Facebook also
+needs a **Page** access token specifically — a user token authenticates but
+cannot post as the Page.
+
+### Two limits worth knowing
+
+- **Instagram caps API publishing at 50 posts per rolling 24h** per account,
+  independent of `accounts.daily_post_limit`.
+- **Meta tokens do not refresh.** Google exchanges a refresh token for a fresh
+  access token on every run; Meta's long-lived token is sent directly and
+  eventually dies with no automatic recovery. When it does, the adapter reports
+  error code 190 and names rotation as the fix.
