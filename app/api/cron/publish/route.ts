@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin, type PostTarget } from "@/lib/supabase";
 import { getAdapter } from "@/lib/adapters";
+import { isAuthFailure } from "@/lib/adapters/types";
 
 export const maxDuration = 60;     // seconds. Raise to 300 on Vercel Pro.
 export const dynamic = "force-dynamic";
@@ -81,16 +82,42 @@ export async function GET(req: Request) {
       results.push({ id: target.id, ok: true, externalPostId: result.externalPostId });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      const exhausted = target.attempts >= MAX_ATTEMPTS;
+      const authFailed = isAuthFailure(err);
+
+      // A dead credential fails identically on every retry, so spending the
+      // remaining attempts only converts a fixable account into dead rows.
+      // Park the post instead and mark the account, which claim_due_posts then
+      // skips until the token is rotated.
+      const exhausted = !authFailed && target.attempts >= MAX_ATTEMPTS;
 
       await supabaseAdmin.from("post_targets").update({
         status: exhausted ? "failed" : "queued",
+        attempts: authFailed ? target.attempts - 1 : target.attempts,
         locked_at: null,
         error_message: msg,
       }).eq("id", target.id);
 
-      console.error(`publish failed for ${target.id}:`, msg);
-      results.push({ id: target.id, ok: false, error: msg, willRetry: !exhausted });
+      if (authFailed) {
+        await supabaseAdmin
+          .from("accounts")
+          .update({ status: "token_expired" })
+          .eq("id", target.account_id);
+
+        console.error(
+          `auth failed for account ${target.account_id}; marked token_expired:`,
+          msg
+        );
+      } else {
+        console.error(`publish failed for ${target.id}:`, msg);
+      }
+
+      results.push({
+        id: target.id,
+        ok: false,
+        error: msg,
+        willRetry: !exhausted,
+        ...(authFailed ? { accountMarkedTokenExpired: true } : {}),
+      });
     }
   }
 

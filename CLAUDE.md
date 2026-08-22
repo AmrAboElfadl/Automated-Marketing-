@@ -71,6 +71,14 @@ brands ─┬─> accounts ──┐
 **The atomic claim is load-bearing.** Overlapping cron runs would otherwise
 double-post. Do not replace it with a plain `SELECT ... WHERE status='queued'`.
 
+**Auth failures are not retryable.** An adapter throws `AdapterAuthError` when
+the platform rejected the *credentials* rather than the request — an expired
+refresh token, a revoked grant, a dead long-lived token. Step 4 then parks the
+post without spending an attempt and sets the account to `token_expired`, which
+`claim_due_posts` skips. The posts wait in `queued` until the secret is rotated
+instead of burning three attempts each and dying as `failed`. Adapters classify;
+the scheduler reacts. Keep the reaction platform-agnostic.
+
 `claim_due_posts` is also where `daily_post_limit` is enforced (migration 003).
 It counts today's `published` **and** in-flight `processing` rows per account,
 so overlapping runs cannot each claim a full allowance, and it skips accounts

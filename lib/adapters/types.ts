@@ -26,6 +26,34 @@ export interface MetricsResult {
   raw: unknown;
 }
 
+/**
+ * Thrown by an adapter when the platform rejected the *credentials* rather than
+ * the request — an expired refresh token, a revoked grant, a dead long-lived
+ * token.
+ *
+ * This is worth distinguishing because retrying cannot help: every attempt
+ * fails identically until a human rotates the secret. The scheduler uses it to
+ * mark the account unhealthy so `claim_due_posts` stops handing it work, which
+ * leaves the posts waiting in `queued` instead of burning their attempts and
+ * dying as `failed`.
+ *
+ * Adapters throw it; nothing else should. It carries no platform detail, so the
+ * scheduler stays platform-agnostic.
+ */
+export class AdapterAuthError extends Error {
+  readonly isAuthFailure = true as const;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "AdapterAuthError";
+  }
+}
+
+/** True for an auth failure thrown by any adapter. */
+export function isAuthFailure(err: unknown): err is AdapterAuthError {
+  return err instanceof AdapterAuthError;
+}
+
 export interface PublishAdapter {
   platform: Platform;
   publish(input: PublishInput): Promise<PublishResult>;
