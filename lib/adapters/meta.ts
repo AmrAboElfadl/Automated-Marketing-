@@ -1,3 +1,4 @@
+import { AdapterAuthError } from "./types";
 import { readSecret } from "../vault";
 
 /**
@@ -86,6 +87,13 @@ const ERROR_HINTS: Record<number, string> = {
   2207026: "the video format is not supported by Instagram",
 };
 
+/**
+ * Codes that mean "the token is dead", as opposed to a transient or
+ * request-specific failure. 190 is an invalid/expired token; 102 is an invalid
+ * session. Both need a rotation, not a retry.
+ */
+const AUTH_FAILURE_CODES = new Set([190, 102]);
+
 interface GraphError {
   message: string;
   code: number;
@@ -126,7 +134,15 @@ export async function describeFailure(res: Response, context: string): Promise<E
   const hint = parsed ? ERROR_HINTS[parsed.code] : undefined;
   if (hint) parts.push(hint);
 
-  return new Error(parts.join(" — "));
+  const message = parts.join(" — ");
+
+  // Credentials rejected, not the request. Meta has no refresh grant, so these
+  // fail identically on every retry until a human rotates the token.
+  if (parsed && AUTH_FAILURE_CODES.has(parsed.code)) {
+    return new AdapterAuthError(message);
+  }
+
+  return new Error(message);
 }
 
 /**

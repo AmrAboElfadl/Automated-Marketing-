@@ -4,6 +4,7 @@ import type {
   PublishInput,
   PublishResult,
 } from "./types";
+import { AdapterAuthError } from "./types";
 import { readSecret } from "../vault";
 
 /**
@@ -92,6 +93,18 @@ const ERROR_HINTS: Record<string, string> = {
     "YOUTUBE_CATEGORY_ID is not a category valid in this channel's region",
 };
 
+/**
+ * Reasons that mean "the credentials are dead", as opposed to a transient or
+ * request-specific failure. These become AdapterAuthError so the scheduler can
+ * stop retrying an account whose token needs a human.
+ */
+const AUTH_FAILURE_REASONS = new Set([
+  "invalid_grant",
+  "invalid_client",
+  "unauthorized_client",
+  "authError",
+]);
+
 // ---------------------------------------------------------------- utilities
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -170,7 +183,15 @@ async function describeFailure(res: Response, context: string): Promise<Error> {
   const hint = ERROR_HINTS[reason];
   if (hint) parts.push(hint);
 
-  return new Error(parts.join(" — "));
+  const message = parts.join(" — ");
+
+  // Credentials rejected, not the request. Retrying cannot fix these, so the
+  // scheduler is told to stop handing this account work until it is rotated.
+  if (AUTH_FAILURE_REASONS.has(reason) || res.status === 401) {
+    return new AdapterAuthError(message);
+  }
+
+  return new Error(message);
 }
 
 // ------------------------------------------------------------------- oauth
@@ -696,6 +717,13 @@ async function fetchMetrics(
     raw: { statistics: stats, analytics: analytics.raw },
   };
 }
+
+/**
+ * Exposed for tests. The auth/retryable split lives inside describeFailure, and
+ * driving it through a full publish() would need a stubbed upload just to
+ * observe which Error subclass came back.
+ */
+export const describeFailureForTest = describeFailure;
 
 export const youtubeAdapter: PublishAdapter = {
   platform: "youtube",
